@@ -1,11 +1,12 @@
-import logger from "./utils/logger";
 import { createServer } from "http";
 import { initSocket } from "./services/socket";
 
-const server = createServer((req, res) => {
-  if (req.url == "/")
-    res.writeHead(200, { "content-type": "text/plain" }).end("Bun is running");
+const PORT = process.env.PORT ?? 8888;
+
+const server = createServer((_req, res) => {
+  res.writeHead(200, { "content-type": "text/plain" }).end("OK");
 });
+
 initSocket(server);
 
-server.listen(8888, () => logger.info("running"));
+server.listen(PORT, () => console.log(`[server] running on :${PORT}`));

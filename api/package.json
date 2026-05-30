@@ -3,17 +3,17 @@
   "module": "main.ts",
   "type": "module",
   "private": true,
+  "scripts": {
+    "dev": "bun --watch main.ts",
+    "start": "NODE_ENV=production bun run main.ts"
+  },
   "devDependencies": {
     "@types/bun": "latest"
-  },
-  "scripts": {
-    "start": "NODE_ENV=production bun run main.ts"
   },
   "peerDependencies": {
     "typescript": "^5.9.2"
   },
   "dependencies": {
-    "socket.io": "^4.8.3",
-    "winston": "^3.19.0"
+    "socket.io": "^4.8.3"
   }
 }

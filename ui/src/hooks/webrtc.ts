@@ -1,263 +1,161 @@
-// src/hooks/useWebRTC.ts
 import { useEffect, useRef, useState } from "react";
 import type { Socket } from "socket.io-client";
 
-// ICE servers for NAT traversal (Google's free STUN server)
-const ICE_SERVERS = {
+const ICE_SERVERS: RTCConfiguration = {
   iceServers: [
     { urls: "stun:stun.l.google.com:19302" },
     { urls: "stun:stun1.l.google.com:19302" },
   ],
 };
 
+export type ChatStatus = "idle" | "searching" | "connected";
+
 export function useWebRTC(socket: Socket | null) {
-  // Store the peer connection object
-  const peerConnection = useRef<RTCPeerConnection | null>(null);
+  const pcRef = useRef<RTCPeerConnection | null>(null);
+  const localStreamRef = useRef<MediaStream | null>(null);
+  const partnerIdRef = useRef<string | null>(null);
 
-  // Store local video stream (your camera/mic)
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
-
-  // Store remote video stream (partner's camera/mic)
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
-
-  // Track who we're connected to
-  const [partnerId, setPartnerId] = useState<string | null>(null);
   const [partnerNick, setPartnerNick] = useState<string | null>(null);
+  const [status, setStatus] = useState<ChatStatus>("idle");
+  const [mediaError, setMediaError] = useState<string | null>(null);
 
-  // Track connection status
-  const [status, setStatus] = useState<"idle" | "searching" | "connected">(
-    "idle",
-  );
-
-  // Initialize local media (camera + microphone)
+  // Request camera + mic once on mount
   useEffect(() => {
-    async function getMedia() {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: true,
-          audio: true,
-        });
+    navigator.mediaDevices
+      .getUserMedia({ video: true, audio: true })
+      .then((stream) => {
+        localStreamRef.current = stream;
         setLocalStream(stream);
-        console.log("📹 Got local stream");
-      } catch (err) {
-        console.error("❌ Failed to get media:", err);
-        alert("Please allow camera and microphone access");
-      }
-    }
+      })
+      .catch(() => setMediaError("Camera or microphone access was denied."));
 
-    getMedia();
-
-    // Cleanup: stop all tracks when component unmounts
     return () => {
-      localStream?.getTracks().forEach((track) => track.stop());
+      localStreamRef.current?.getTracks().forEach((t) => t.stop());
     };
-  });
+  }, []);
 
-  // Create a new peer connection
-  const createPeerConnection = (
-    isInitiator: boolean,
-    partnerSocketId: string,
-  ) => {
-    // Close existing connection if any
-    if (peerConnection.current) {
-      peerConnection.current.close();
-    }
+  // All socket-based logic lives in one effect, re-runs only when socket changes
+  useEffect(() => {
+    if (!socket) return;
 
-    // Create new RTCPeerConnection with STUN servers
-    const pc = new RTCPeerConnection(ICE_SERVERS);
-    peerConnection.current = pc;
+    const closeConnection = () => {
+      pcRef.current?.close();
+      pcRef.current = null;
+      partnerIdRef.current = null;
+      setRemoteStream(null);
+      setPartnerNick(null);
+      setStatus("idle");
+    };
 
-    // Add local stream tracks to the connection
-    if (localStream) {
-      localStream.getTracks().forEach((track) => {
-        pc.addTrack(track, localStream);
+    const createPC = (partnerId: string): RTCPeerConnection => {
+      if (pcRef.current) {
+        pcRef.current.close();
+        pcRef.current = null;
+      }
+      partnerIdRef.current = partnerId;
+
+      const pc = new RTCPeerConnection(ICE_SERVERS);
+      pcRef.current = pc;
+
+      localStreamRef.current?.getTracks().forEach((track) => {
+        pc.addTrack(track, localStreamRef.current!);
       });
-    }
 
-    // Listen for remote stream
-    const remoteStreamObj = new MediaStream();
-    pc.ontrack = (event) => {
-      console.log("📥 Received remote track");
-      event.streams[0].getTracks().forEach((track) => {
-        remoteStreamObj.addTrack(track);
-      });
-      setRemoteStream(remoteStreamObj);
-      setStatus("connected");
-    };
+      const incoming = new MediaStream();
+      pc.ontrack = (e) => {
+        e.streams[0].getTracks().forEach((t) => incoming.addTrack(t));
+        setRemoteStream(incoming);
+      };
 
-    // Handle ICE candidates (network routing info)
-    pc.onicecandidate = (event) => {
-      if (event.candidate && socket) {
-        socket.emit("ice_candidate", {
-          candidate: event.candidate,
-          to: partnerSocketId,
-        });
-      }
-    };
-
-    // Monitor connection state changes
-    pc.onconnectionstatechange = () => {
-      console.log("Connection state:", pc.connectionState);
-      if (
-        pc.connectionState === "disconnected" ||
-        pc.connectionState === "failed"
-      ) {
-        handleDisconnect();
-      }
-    };
-
-    // If we're the one who initiated, create and send offer
-    if (isInitiator) {
-      pc.createOffer()
-        .then((offer) => pc.setLocalDescription(offer))
-        .then(() => {
-          socket?.emit("webrtc_offer", {
-            offer: pc.localDescription,
-            to: partnerSocketId,
-          });
-          console.log("📤 Sent offer to", partnerSocketId);
-        })
-        .catch((err) => console.error("Error creating offer:", err));
-    }
-
-    return pc;
-  };
-
-  // Handle incoming WebRTC offer
-  useEffect(() => {
-    if (!socket) return;
-
-    socket.on("webrtc_offer", async ({ offer, from }) => {
-      console.log("📥 Received offer from", from);
-
-      const pc = createPeerConnection(false, from);
-
-      try {
-        // Set the received offer
-        await pc.setRemoteDescription(new RTCSessionDescription(offer));
-
-        // Create and send answer
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-
-        socket.emit("webrtc_answer", {
-          answer: pc.localDescription,
-          to: from,
-        });
-
-        console.log("📤 Sent answer to", from);
-      } catch (err) {
-        console.error("Error handling offer:", err);
-      }
-    });
-
-    return () => {
-      socket.off("webrtc_offer");
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [socket, localStream]);
-
-  // Handle incoming WebRTC answer
-  useEffect(() => {
-    if (!socket) return;
-
-    socket.on("webrtc_answer", async ({ answer, from }) => {
-      console.log("📥 Received answer from", from);
-
-      if (peerConnection.current) {
-        try {
-          await peerConnection.current.setRemoteDescription(
-            new RTCSessionDescription(answer),
-          );
-        } catch (err) {
-          console.error("Error setting remote description:", err);
+      pc.onicecandidate = (e) => {
+        if (e.candidate) {
+          socket.emit("ice_candidate", { candidate: e.candidate, to: partnerId });
         }
-      }
-    });
+      };
 
-    return () => {
-      socket.off("webrtc_answer");
-    };
-  }, [socket]);
-
-  // Handle incoming ICE candidates
-  useEffect(() => {
-    if (!socket) return;
-
-    socket.on("ice_candidate", async ({ candidate }) => {
-      if (peerConnection.current) {
-        try {
-          await peerConnection.current.addIceCandidate(
-            new RTCIceCandidate(candidate),
-          );
-        } catch (err) {
-          console.error("Error adding ICE candidate:", err);
+      pc.onconnectionstatechange = () => {
+        if (pc.connectionState === "disconnected" || pc.connectionState === "failed") {
+          closeConnection();
         }
-      }
-    });
+      };
 
-    return () => {
-      socket.off("ice_candidate");
+      return pc;
     };
-  }, [socket]);
 
-  // Handle when we get matched with someone
-  useEffect(() => {
-    if (!socket) return;
-
-    socket.on(
-      "matched",
-      ({ partnerId: pid, shouldInitiate, partnerNick: pNick }) => {
-        console.log("🤝 Matched with", pNick, "| Initiating:", shouldInitiate);
-        setPartnerId(pid);
-        setPartnerNick(pNick);
-        setStatus("connected");
-
-        // Only create offer if we're the initiator
-        // The other person will wait for the offer and respond with answer
-        createPeerConnection(shouldInitiate, pid);
-      },
-    );
-
-    socket.on("searching", () => {
-      setStatus("searching");
-      console.log("⏳ Searching for partner...");
-    });
-
-    socket.on("partner_left", () => {
-      console.log("👋 Partner left");
-      handleDisconnect();
-      // Automatically search for next person instead of going idle
+    const autoSearch = () => {
       setTimeout(() => {
         socket.emit("find_match");
         setStatus("searching");
-      }, 500); // small delay so disconnect cleans up properly
+      }, 500);
+    };
+
+    socket.on("matched", ({ partnerId, shouldInitiate, partnerNick: nick }) => {
+      setPartnerNick(nick);
+      setStatus("connected");
+      partnerIdRef.current = partnerId;
+
+      if (shouldInitiate) {
+        const pc = createPC(partnerId);
+        pc.createOffer()
+          .then((offer) => pc.setLocalDescription(offer))
+          .then(() => {
+            socket.emit("webrtc_offer", { offer: pc.localDescription, to: partnerId });
+          })
+          .catch(console.error);
+      }
     });
 
-    // Handle when partner's browser closes or disconnects abruptly
+    socket.on("webrtc_offer", async ({ offer, from }) => {
+      const pc = createPC(from);
+      await pc.setRemoteDescription(new RTCSessionDescription(offer));
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      socket.emit("webrtc_answer", { answer: pc.localDescription, to: from });
+    });
+
+    socket.on("webrtc_answer", async ({ answer }) => {
+      if (pcRef.current) {
+        await pcRef.current
+          .setRemoteDescription(new RTCSessionDescription(answer))
+          .catch(console.error);
+      }
+    });
+
+    socket.on("ice_candidate", async ({ candidate }) => {
+      if (pcRef.current) {
+        await pcRef.current
+          .addIceCandidate(new RTCIceCandidate(candidate))
+          .catch(console.error);
+      }
+    });
+
+    socket.on("searching", () => setStatus("searching"));
+
+    socket.on("partner_left", () => {
+      closeConnection();
+      autoSearch();
+    });
+
     socket.on("user_disconnected", ({ disconnectedId }) => {
-      // Only care if it's our current partner
-      if (disconnectedId === partnerId) {
-        console.log("👋 Partner disconnected");
-        handleDisconnect();
-        // Auto-search for next person
-        setTimeout(() => {
-          socket.emit("find_match");
-          setStatus("searching");
-        }, 500);
+      if (disconnectedId === partnerIdRef.current) {
+        closeConnection();
+        autoSearch();
       }
     });
 
     return () => {
       socket.off("matched");
+      socket.off("webrtc_offer");
+      socket.off("webrtc_answer");
+      socket.off("ice_candidate");
       socket.off("searching");
       socket.off("partner_left");
       socket.off("user_disconnected");
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [socket, localStream, partnerId]);
+  }, [socket]);
 
-  // Start searching for a match
   const findMatch = () => {
     if (socket) {
       socket.emit("find_match");
@@ -265,20 +163,21 @@ export function useWebRTC(socket: Socket | null) {
     }
   };
 
-  // Skip to next person
   const nextPerson = () => {
-    if (socket && partnerId) {
-      socket.emit("next", { partnerId });
-      handleDisconnect();
-      // Auto-search for next person
+    if (socket && partnerIdRef.current) {
+      socket.emit("next", { partnerId: partnerIdRef.current });
+      pcRef.current?.close();
+      pcRef.current = null;
+      partnerIdRef.current = null;
+      setRemoteStream(null);
+      setPartnerNick(null);
       setTimeout(() => {
         socket.emit("find_match");
         setStatus("searching");
-      }, 500);
+      }, 300);
     }
   };
 
-  // Cancel searching
   const cancelSearch = () => {
     if (socket) {
       socket.emit("cancel_search");
@@ -286,23 +185,12 @@ export function useWebRTC(socket: Socket | null) {
     }
   };
 
-  // Cleanup connection
-  const handleDisconnect = () => {
-    if (peerConnection.current) {
-      peerConnection.current.close();
-      peerConnection.current = null;
-    }
-    setRemoteStream(null);
-    setPartnerId(null);
-    setPartnerNick(null);
-    setStatus("idle");
-  };
-
   return {
     localStream,
     remoteStream,
     partnerNick,
     status,
+    mediaError,
     findMatch,
     nextPerson,
     cancelSearch,

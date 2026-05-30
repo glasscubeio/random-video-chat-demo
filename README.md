@@ -1,211 +1,111 @@
-# 🎥 Random Video Chat Platform
+# Hello, Stranger.
 
-Simple Omegle-style random video chat platform built to experiment with:
+> Anonymous random video chat — a portfolio demonstrator by [glasscube.uz](https://glasscube.uz)
 
-* ⚡ Bun
-* 🔌 Socket.IO
-* 📹 WebRTC
-* ⚛️ React
-* 🎨 TailwindCSS
-
-This project focuses on understanding how peer-to-peer browser communication works using WebRTC signaling over WebSockets.
+Live at **[stranger.glasscube.uz](https://stranger.glasscube.uz)**  
+Source: [github.com/glasscubeio/random-video-chat-demo](https://github.com/glasscubeio/random-video-chat-demo)
 
 ---
 
-# ✨ Features
+## What it does
 
-* Random video matchmaking
-* Real-time Socket.IO signaling
-* Browser-to-browser WebRTC connection
-* Username availability checking
-* Simple in-memory user tracking
-* Queue-based random pairing
-* Lightweight architecture
-* Minimal UI and controls
+Users visit the site, pick a nickname, and are matched with a random stranger for a live video call. Everything is anonymous and ephemeral — no accounts, no history, no database. When you leave, your name is freed and your session is gone.
 
----
+## How it works
 
-# 🧠 Goal Of The Project
-
-The main purpose of this project was learning:
-
-* How WebRTC works internally
-* ICE candidate exchange
-* SDP offer/answer flow
-* WebSocket signaling
-* Socket.IO event handling
-* Browser peer connection lifecycle
-* Real-time matchmaking systems
-
-This is not intended to be a production-ready clone.
-
-It is mainly an educational playground for experimenting with real-time communication systems.
-
----
-
-# 📁 Project Structure
-
-```txt
-root/
- ├── api/      -> Bun + Socket.IO signaling server
- ├── ui/       -> React frontend
- └── README.md
+```
+User A visits                         User B visits
+     │                                      │
+     ▼                                      ▼
+ Pick nickname                         Pick nickname
+     │                                      │
+     └──────► Socket.IO signaling ◄─────────┘
+                     │
+              Matchmaking queue
+                     │
+         Both users get "matched"
+                     │
+        WebRTC offer/answer exchange
+                     │
+        ┌────────────────────────────┐
+        │  Direct peer-to-peer video │
+        └────────────────────────────┘
 ```
 
----
+- **Signaling** is handled by the backend via Socket.IO
+- **Video** streams directly browser-to-browser over WebRTC (no server relay)
+- **Nicknames** are held in server memory for the duration of the session
+- Disconnect → name is freed, session ends
 
-# ⚙️ Backend Server
+## Project structure
 
-The backend server handles:
-
-* User registration
-* Username validation
-* Matchmaking queue
-* WebRTC signaling
-* Socket.IO communication
-
-The server stores users in memory only.
-
-If a user refreshes or disconnects, the username becomes available again after cleanup.
-
----
-
-## 🚀 Running The API
-
-The server runs on:
-
-```txt
-http://localhost:8888
+```
+hellostranger/
+├── api/          Bun + Socket.IO signaling server
+│   ├── main.ts
+│   ├── services/socket.ts
+│   └── utils/cache.ts
+├── ui/           React + Vite frontend
+│   └── src/
+│       ├── components/
+│       │   ├── LandingScreen.tsx
+│       │   ├── ChatScreen.tsx
+│       │   └── HowItWorksModal.tsx
+│       └── hooks/
+│           ├── socket.ts
+│           └── webrtc.ts
+└── README.md
 ```
 
-Start the server:
+## Running locally
 
+**Backend** (runs on port 8888):
 ```bash
-bun run start
+cd api
+bun install
+bun dev
 ```
 
----
-
-# 🖥️ Frontend
-
-The frontend provides:
-
-* Username input
-* Video connection UI
-* Random matchmaking controls
-* WebRTC stream handling
-
-The UI communicates with the Socket.IO backend for signaling.
-
----
-
-# 🚀 Running The UI
-
-Inside the `ui` folder:
-
+**Frontend** (runs on port 5173):
 ```bash
-bun run dev
+cd ui
+bun install
+cp .env.example .env   # set VITE_API_URL=http://localhost:8888
+bun dev
 ```
 
-Or build production files:
+## Deployment
 
-```bash
-bun run build
-```
+| Service  | URL                       |
+| -------- | ------------------------- |
+| Frontend | stranger.glasscube.uz     |
+| Backend  | wsv.glasscube.uz          |
 
----
+The frontend is a static Vite build. The backend is a single Bun process.
 
-# 🔄 WebRTC Flow
+## Tech stack
 
-The general connection flow:
+| Layer       | Tech                         |
+| ----------- | ---------------------------- |
+| Runtime     | Bun                          |
+| Backend     | Socket.IO 4                  |
+| Frontend    | React 19 + Vite 7            |
+| Styling     | Tailwind CSS v4              |
+| Animations  | Framer Motion                |
+| Icons       | Lucide React                 |
+| P2P video   | WebRTC (browser native)      |
+| Signaling   | Socket.IO over WebSocket     |
+| State       | In-memory (Map)              |
 
-```txt
-Client A
-   ↓
-Socket.IO signaling
-   ↓
-Server matchmaking
-   ↓
-Client B
-   ↓
-Offer / Answer exchange
-   ↓
-ICE candidate exchange
-   ↓
-Direct peer-to-peer video connection
-```
+## Known limitations
 
----
+- No TURN server — connections may fail on restrictive NATs/firewalls
+- Single-server only — no horizontal scaling
+- In-memory state — restart clears all users
+- No moderation, no abuse protection
 
-# 🛠️ Tech Stack
+For a production deployment you'd add STUN/TURN infrastructure, persistent sessions, and auth. This project intentionally keeps none of that.
 
-## Backend
-
-* Bun
-* Socket.IO
-
-## Frontend
-
-* React
-* Vite
-* TailwindCSS
-
-## Real-Time Communication
-
-* WebRTC
-* Socket.IO Client
-
----
-
-# ⚠️ Important Notes
-
-## In-Memory Storage
-
-This project uses in-memory state only.
-
-That means:
-
-* Restarting the server resets everything
-* No persistence/database
-* No authentication
-* No scaling support
-
----
-
-## NAT / TURN Limitations
-
-This project is intentionally simple.
-
-Some users/networks may fail to connect because:
-
-* No TURN relay server
-* NAT traversal limitations
-* Strict firewall environments
-
-For real production deployments you would normally add:
-
-* STUN/TURN infrastructure
-* Persistent sessions
-* Moderation systems
-* Authentication
-* Abuse protection
-* Distributed signaling
-
----
-
-# 📚 Learning Focus
-
-This project was mainly built to understand:
-
-* Real-time systems
-* WebSocket architecture
-* Peer connection setup
-* Signaling servers
-* Browser media APIs
-* Event-driven communication
-
----
-
-# 📄 License
+## License
 
 MIT

@@ -13,11 +13,18 @@ const socketToNick = new Map<string, string>();
 
 export function initSocket(server: HttpServer) {
   io = new Server(server, {
-    cors: { origin: "*" },
+    cors: {
+      origin: ["https://stranger.glasscube.uz", "http://localhost:5173"],
+      methods: ["GET", "POST"],
+      credentials: true,
+    },
   });
 
   io.on("connection", (socket) => {
-    const { nick, did } = socket.handshake.auth as { nick?: string; did?: string };
+    const { nick, did } = socket.handshake.auth as {
+      nick?: string;
+      did?: string;
+    };
 
     if (!nick || !did) {
       socket.emit("error", "Missing nick or did");
@@ -58,8 +65,16 @@ export function initSocket(server: HttpServer) {
         partners.set(socket.id, partnerId);
         partners.set(partnerId, socket.id);
 
-        socket.emit("matched", { partnerId, shouldInitiate: true, partnerNick });
-        io?.to(partnerId).emit("matched", { partnerId: socket.id, shouldInitiate: false, partnerNick: nick });
+        socket.emit("matched", {
+          partnerId,
+          shouldInitiate: true,
+          partnerNick,
+        });
+        io?.to(partnerId).emit("matched", {
+          partnerId: socket.id,
+          shouldInitiate: false,
+          partnerNick: nick,
+        });
         console.log(`[match] ${nick} ↔ ${partnerNick}`);
       } else {
         waitingQueue.push(socket.id);
@@ -73,17 +88,26 @@ export function initSocket(server: HttpServer) {
     });
 
     // WebRTC signaling — forward to target socket only
-    socket.on("webrtc_offer", ({ offer, to }: { offer: RTCSessionDescriptionInit; to: string }) => {
-      io?.to(to).emit("webrtc_offer", { offer, from: socket.id });
-    });
+    socket.on(
+      "webrtc_offer",
+      ({ offer, to }: { offer: RTCSessionDescriptionInit; to: string }) => {
+        io?.to(to).emit("webrtc_offer", { offer, from: socket.id });
+      },
+    );
 
-    socket.on("webrtc_answer", ({ answer, to }: { answer: RTCSessionDescriptionInit; to: string }) => {
-      io?.to(to).emit("webrtc_answer", { answer, from: socket.id });
-    });
+    socket.on(
+      "webrtc_answer",
+      ({ answer, to }: { answer: RTCSessionDescriptionInit; to: string }) => {
+        io?.to(to).emit("webrtc_answer", { answer, from: socket.id });
+      },
+    );
 
-    socket.on("ice_candidate", ({ candidate, to }: { candidate: RTCIceCandidateInit; to: string }) => {
-      io?.to(to).emit("ice_candidate", { candidate, from: socket.id });
-    });
+    socket.on(
+      "ice_candidate",
+      ({ candidate, to }: { candidate: RTCIceCandidateInit; to: string }) => {
+        io?.to(to).emit("ice_candidate", { candidate, from: socket.id });
+      },
+    );
 
     // Skip to next person
     socket.on("next", ({ partnerId }: { partnerId: string }) => {
